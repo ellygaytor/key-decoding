@@ -294,12 +294,14 @@ var keys = {
     },
     Subaru: {
         displayName: "Subaru DSD435",
-        outlines: ["10 cuts/TOY48P"],
+        outlines: ["9 cuts/TOY48P"],
         isInternalCut: true,
-        pinSpacing: 22,        
-        maxKeyCut: 3,          
-        cutDepthOffset: 4,     
-        flatSpotWidth: 3       
+        pinSpacing: 22,
+        maxKeyCut: 3,
+        cutDepthOffset: 4,
+        flatSpotWidth: 3,
+        // DSD 435 is asymmetric: 4 cuts on the top track, 5 on the bottom.
+        topCutCount: 4
     },
 
     Suzuki: {
@@ -860,12 +862,19 @@ function drawDisksWithUnderline(disks, selectedDiskIndex, showMode, pinSpacing, 
  * @param {string} keyType - Brand key into `keys`.
  */
 function drawInternalCutPinsWithUnderline(pins, selectedPinIndex, showMode, pinSpacing, keyType) {
-    var half = Math.floor(pins.length / 2);
     var keyConfig = keys[keyType] || {};
     var cutDepthOffset = keyConfig.cutDepthOffset || 3;
     var maxKeyCut = keyConfig.maxKeyCut || 4;
     var flatSpotWidth = keyConfig.flatSpotWidth || 4;
     var pinsStartCount = keyConfig.pinsStartAtZero === true;
+
+    // Top track may have fewer cuts than the bottom (e.g. Subaru DSD 435 is 4+5).
+    // Default to an even split when topCutCount isn't specified.
+    var topCount = (typeof keyConfig.topCutCount === "number")
+        ? keyConfig.topCutCount
+        : Math.floor(pins.length / 2);
+    var botCount = pins.length - topCount;
+    var maxCount = topCount > botCount ? topCount : botCount;
 
     // Blade dimensions at ~7.5 px/mm (see CLAUDE.md "Pixel scale"):
     //   leadingGroove 90 px  ~= 12 mm shoulder-to-first-cut runout
@@ -876,8 +885,9 @@ function drawInternalCutPinsWithUnderline(pins, selectedPinIndex, showMode, pinS
     var trailingMargin = 30;
     var bladeHeight = 56;
     var firstCutX = bladeX + leadingGroove;
-    var lastCutX = firstCutX + pinSpacing * (half - 1);
-    var bladeRight = lastCutX + trailingMargin;
+    var topLastCutX = firstCutX + pinSpacing * (topCount - 1);
+    var botLastCutX = firstCutX + pinSpacing * (botCount - 1);
+    var bladeRight = firstCutX + pinSpacing * (maxCount - 1) + trailingMargin;
     var bladeWidth = bladeRight - bladeX;
 
     var topNumY = 50;
@@ -892,7 +902,7 @@ function drawInternalCutPinsWithUnderline(pins, selectedPinIndex, showMode, pinS
     var flatHalfWidth = Math.floor(flatSpotWidth / 2);
 
     // Top-track numbers row, each centred over its cut column.
-    for (var i = 0; i < half; i++) {
+    for (var i = 0; i < topCount; i++) {
         var cutX = firstCutX + i * pinSpacing;
         var topNumX = cutX - 6;
         var topDisplay = pinsStartCount ? pins[i] : (pins[i] + 1);
@@ -913,7 +923,9 @@ function drawInternalCutPinsWithUnderline(pins, selectedPinIndex, showMode, pinS
 
     // Render two milled tracks column-by-column. In the leading groove and
     // after the last cut, both tracks sit at max depth (closest to centre);
-    // between firstCutX and lastCutX, depth comes from the per-cut profile.
+    // between firstCutX and the per-track lastCutX, depth comes from the
+    // per-cut profile. The tracks are evaluated independently because they
+    // may have different cut counts.
     var prevTopY = topBaseY + maxDepth;
     var prevBotY = botBaseY - maxDepth;
 
@@ -923,33 +935,40 @@ function drawInternalCutPinsWithUnderline(pins, selectedPinIndex, showMode, pinS
 
         if (colX < firstCutX) {
             topDepth = maxDepth;
-            botDepth = maxDepth;
-        } else if (colX > lastCutX) { 
-            topDepth = -3*cutDepthOffset;
-            botDepth = -3*cutDepthOffset;
+        } else if (colX > topLastCutX) {
+            topDepth = -3 * cutDepthOffset;
         } else {
             topDepth = 0;
-            botDepth = 0;
-            for (var ci = 0; ci < half; ci++) {
-                var cutCenter = firstCutX + ci * pinSpacing;
-                var dist = Math.abs(colX - cutCenter);
-
-                var topPinDepth = (pins[ci] || 0) * cutDepthOffset;
+            for (var ti = 0; ti < topCount; ti++) {
+                var topCutCenter = firstCutX + ti * pinSpacing;
+                var topDist = Math.abs(colX - topCutCenter);
+                var topPinDepth = (pins[ti] || 0) * cutDepthOffset;
                 var topHere;
-                if (dist <= flatHalfWidth) {
+                if (topDist <= flatHalfWidth) {
                     topHere = topPinDepth;
                 } else {
-                    topHere = topPinDepth - (dist - flatHalfWidth);
+                    topHere = topPinDepth - (topDist - flatHalfWidth);
                     if (topHere < 0) { topHere = 0; }
                 }
                 if (topHere > topDepth) { topDepth = topHere; }
+            }
+        }
 
-                var botPinDepth = (pins[half + ci] || 0) * cutDepthOffset;
+        if (colX < firstCutX) {
+            botDepth = maxDepth;
+        } else if (colX > botLastCutX) {
+            botDepth = -3 * cutDepthOffset;
+        } else {
+            botDepth = 0;
+            for (var bi = 0; bi < botCount; bi++) {
+                var botCutCenter = firstCutX + bi * pinSpacing;
+                var botDist = Math.abs(colX - botCutCenter);
+                var botPinDepth = (pins[topCount + bi] || 0) * cutDepthOffset;
                 var botHere;
-                if (dist <= flatHalfWidth) {
+                if (botDist <= flatHalfWidth) {
                     botHere = botPinDepth;
                 } else {
-                    botHere = botPinDepth - (dist - flatHalfWidth);
+                    botHere = botPinDepth - (botDist - flatHalfWidth);
                     if (botHere < 0) { botHere = 0; }
                 }
                 if (botHere > botDepth) { botDepth = botHere; }
@@ -974,12 +993,12 @@ function drawInternalCutPinsWithUnderline(pins, selectedPinIndex, showMode, pinS
     }
 
     // Bottom-track numbers row.
-    for (var j = 0; j < half; j++) {
+    for (var j = 0; j < botCount; j++) {
         var cutX2 = firstCutX + j * pinSpacing;
         var botNumX = cutX2 - 6;
-        var botDisplay = pinsStartCount ? pins[half + j] : (pins[half + j] + 1);
+        var botDisplay = pinsStartCount ? pins[topCount + j] : (pins[topCount + j] + 1);
         display.drawString(botDisplay.toString(), botNumX, botNumY);
-        if (showMode !== "random" && typeof selectedPinIndex !== "undefined" && (half + j) === selectedPinIndex) {
+        if (showMode !== "random" && typeof selectedPinIndex !== "undefined" && (topCount + j) === selectedPinIndex) {
             display.drawRect(botNumX - 1, botUnderlineY, 12, 2, secColor);
         }
     }
